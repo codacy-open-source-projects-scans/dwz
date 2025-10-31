@@ -1,0 +1,8 @@
+*.o
+*.dwo
+*~
+dwz
+dwz.sum
+dwz.log
+native.c
+testsuite/dwz.tests/execs
