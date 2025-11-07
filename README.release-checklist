@@ -22,7 +22,6 @@
   - dwarf-discuss@lists.dwarfstd.org
   - gcc@gcc.gnu.org
   - gdb@sourceware.org
-  - lldb-dev@lists.llvm.org
 - Update web page ( https://sourceware.org/dwz/ ):
   - Add news item with hlink to release annoucement.
   - Add entry in release list.

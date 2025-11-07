@@ -37,8 +37,6 @@
 #include <sys/times.h>
 #include <sys/wait.h>
 
-#include <obstack.h>
-
 #include <gelf.h>
 #include <xxhash.h>
 
@@ -48,6 +46,7 @@
 #include "args.h"
 #include "util.h"
 #include "pool.h"
+#include "obstack-wrapper.h"
 
 #ifndef SHF_COMPRESSED
  /* Glibc elf.h contains SHF_COMPRESSED starting v2.22.  Libelf libelf.h has
@@ -210,9 +209,6 @@ report_progress (void)
       fclose (s);
     }
 }
-
-#define obstack_chunk_alloc     malloc
-#define obstack_chunk_free      free
 
 /* Where to longjmp on OOM.  */
 static jmp_buf oom_buf;
@@ -5235,7 +5231,7 @@ die_eq (const void *p, const void *q)
 	  }
 	arr[i]->die_remove = 0;
       }
-  obstack_free (&ob, (void *) arr);
+  obstack_free (&ob, arr);
   return ret;
 }
 
@@ -5926,7 +5922,7 @@ finalize_strp (bool build_tail_offset_list)
       tail_offset_list[k++] = 0;
       assert (k == tail_offset_list_count);
     }
-  obstack_free (&ob, (void *) arr);
+  obstack_free (&ob, arr);
   return tail_offset_list;
 }
 
@@ -10437,7 +10433,7 @@ handle_macro (void)
 	  htab_delete (macro_htab);
 	  macro_htab = NULL;
 	}
-      obstack_free (&ob, (void *) to_free);
+      obstack_free (&ob, to_free);
     }
 }
 
@@ -11616,8 +11612,8 @@ compute_abbrevs (DSO *dso)
 	      *slot = arr[i];
 	    }
 	}
-      obstack_free (&ob, (void *) arr);
-      obstack_free (&ob2, (void *) intracuarr);
+      obstack_free (&ob, arr);
+      obstack_free (&ob2, intracuarr);
       if (cu->cu_kind == CU_TYPES)
 	{
 	  cu->cu_new_offset = types_size;
@@ -11634,7 +11630,7 @@ compute_abbrevs (DSO *dso)
     }
   if (wr_multifile)
     total_size += 11; /* See the end of write_info.  */
-  obstack_free (&ob2, (void *) t);
+  obstack_free (&ob2, t);
   cuarr = (dw_cu_ref *) obstack_alloc (&ob2, ncus * sizeof (dw_cu_ref));
   for (cu = first_cu, i = 0; cu; cu = cu->cu_next)
     if (cu->u1.cu_new_abbrev_owner == NULL
@@ -11712,7 +11708,7 @@ compute_abbrevs (DSO *dso)
 	      cuarr[i]->u1.cu_new_abbrev_owner = cuarr[j];
 	      break;
 	    }
-	  obstack_free (&ob2, (void *) arr);
+	  obstack_free (&ob2, arr);
 	  continue;
 	}
       /* Don't search all CUs, that might be too expensive.  So just search
@@ -11811,9 +11807,9 @@ compute_abbrevs (DSO *dso)
 	      cuarr[i]->u1.cu_new_abbrev_owner = cuarr[j];
 	    }
 	}
-      obstack_free (&ob2, (void *) arr);
+      obstack_free (&ob2, arr);
     }
-  obstack_free (&ob2, (void *) t);
+  obstack_free (&ob2, cuarr);
   for (cu = first_cu; cu; cu = cu->cu_next)
     {
       struct abbrev_tag **arr;
@@ -11852,7 +11848,7 @@ compute_abbrevs (DSO *dso)
 	  abbrev_size += 2;
 	}
       abbrev_size += 1;
-      obstack_free (&ob, (void *) arr);
+      obstack_free (&ob, arr);
     }
   for (cu = first_cu; cu; cu = cu->cu_next)
     if (unlikely (fi_multifile)
@@ -11945,7 +11941,7 @@ write_abbrev (void)
 	  *ptr++ = 0;
 	}
       *ptr++ = 0;
-      obstack_free (&ob, (void *) arr);
+      obstack_free (&ob, arr);
       if (likely (!low_mem))
 	{
 	  htab_delete (cu->cu_new_abbrev);
@@ -12825,7 +12821,7 @@ recompute_abbrevs (dw_cu_ref cu, unsigned int cu_size)
 				      &intracuvec);
       assert (*intracuvec == NULL);
     }
-  obstack_free (&ob2, (void *) t);
+  obstack_free (&ob2, t);
   assert (off == cu_size);
 }
 
@@ -13366,7 +13362,7 @@ write_gdb_index (const char *file)
 	if (buf_read_ule64 (inptr) != cu->cu_offset)
 	  {
 	    if (cumap)
-	      obstack_free (&ob2, (void *) cumap);
+	      obstack_free (&ob2, cumap);
 	    if (file)
 	      error (0, 0, "%s: unexpected cu cu_offset in .gdb_index", file);
 	    return;
@@ -13400,9 +13396,9 @@ write_gdb_index (const char *file)
 	if (tuindices[2 * tuidx] != cu->cu_offset)
 	  {
 	    if (cumap)
-	      obstack_free (&ob2, (void *) cumap);
+	      obstack_free (&ob2, cumap);
 	    else
-	      obstack_free (&ob2, (void *) tuindices);
+	      obstack_free (&ob2, tuindices);
 	    if (file)
 	      error (0, 0, "%s: unexpected tui cu_offset in .gdb_index", file);
 	    return;
@@ -13604,9 +13600,9 @@ write_gdb_index (const char *file)
 	}
     }
   if (cumap)
-    obstack_free (&ob2, (void *) cumap);
+    obstack_free (&ob2, cumap);
   else if (tuindices)
-    obstack_free (&ob2, (void *) tuindices);
+    obstack_free (&ob2, tuindices);
   if (fail)
     {
       if (file)
@@ -14495,8 +14491,8 @@ cleanup (void)
       saved_new_data[i] = NULL;
     }
 
-  obstack_free (&ob2, NULL);
-  obstack_free (&ob, NULL);
+  obstack_destroy (&ob2);
+  obstack_destroy (&ob);
   memset (&ob2, '\0', sizeof (ob2));
   memset (&ob, '\0', sizeof (ob2));
   die_nontoplevel_freelist = NULL;
@@ -14767,7 +14763,7 @@ write_multifile_strp (void)
       && ret == 0
       && write (multi_str_fd, buf, buf_size) != (ssize_t) buf_size)
     ret = 1;
-  obstack_free (&ob, (void *) arr);
+  obstack_free (&ob, arr);
   return ret;
 }
 
@@ -14947,7 +14943,7 @@ write_multifile_line (void)
       if (multi_line_off + len < multi_line_off)
 	{
 	  if (line_htab)
-	    obstack_free (&ob, (void *) filearr);
+	    obstack_free (&ob, filearr);
 	  return 1;
 	}
 
@@ -15066,12 +15062,12 @@ write_multifile_line (void)
       else
 	multi_line_off += len;
       if (line_htab)
-	obstack_free (&ob, (void *) filearr);
+	obstack_free (&ob, filearr);
       else if (line != buf)
-	obstack_free (&ob, (void *) line);
+	obstack_free (&ob, line);
     }
   else if (line_htab)
-    obstack_free (&ob, (void *) filearr);
+    obstack_free (&ob, filearr);
   return ret;
 }
 
@@ -15737,10 +15733,8 @@ optimize_multifile (unsigned int *die_count)
     = "\0.shstrtab\0.gdb_index\0"
       ".debug_info\0.debug_abbrev\0.debug_line\0.debug_str\0.debug_macro\0"
       ".debug_sup";
-  const char *const shstrtab = dwarf_5 ? shstrtab_dwarf5 : shstrtab_gnu;
-  const size_t shstrtab_len = (dwarf_5
-			       ? sizeof shstrtab_dwarf5
-			       : sizeof shstrtab_gnu);
+  const char *shstrtab;
+  size_t shstrtab_len;
   const char *p;
   unsigned char note[0x24], *np, *supp;
   struct sha1_ctx ctx;
@@ -16025,6 +16019,9 @@ optimize_multifile (unsigned int *die_count)
 
   if (dwarf_5)
     memcpy (supp, multifile_sha1, 0x14);
+
+  shstrtab = dwarf_5 ? shstrtab_dwarf5 : shstrtab_gnu;
+  shstrtab_len = (dwarf_5 ? sizeof shstrtab_dwarf5 : sizeof shstrtab_gnu);
 
   memset (&shdr, '\0', sizeof (shdr));
   shdr.sh_offset = multi_ehdr.e_ehsize;

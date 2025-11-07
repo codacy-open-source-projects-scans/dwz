@@ -86,6 +86,12 @@ process_line ()
 	who=suse
 	line=$(echo "$line" \
 		   | sed 's/SUSE LLC\.//')
+    elif echo "$line" \
+	    | grep -q "Mark J\. Wielaard <mark@klomp.org>"; then
+	mjw=true
+	who=mjw
+	line=$(echo "$line" \
+		   | sed 's/Mark J\. Wielaard <mark@klomp.org>//')
     else
 	echo "error: unknown copyright: $line"
 	exit 1
@@ -113,6 +119,9 @@ process_line ()
     elif $suse; then
 	suse_max=$(max "$suse_max" "$max_year")
 	suse_min=$(min "$suse_min" "$min_year")
+    elif $mjw; then
+	mjw_max=$(max "$mjw_max" "$max_year")
+	mjw_min=$(min "$mjw_min" "$min_year")
     fi
 }
 
@@ -158,6 +167,8 @@ main ()
     echo "-DRH_YEARS='\"$(print_range $rh_min $rh_max)\"'" \
 	 >> COPYRIGHT_YEARS
     echo "-DSUSE_YEARS='\"$(print_range $suse_min $suse_max)\"'" \
+	 >> COPYRIGHT_YEARS
+    echo "-DMJW_YEARS='\"$(print_range $mjw_min $mjw_max)\"'" \
 	 >> COPYRIGHT_YEARS
 }
 

@@ -26,7 +26,7 @@ git clone \
     $rootdir
 
 cd $dir/$rootdir
-git ch $tag
+git checkout $tag
 
 rm -Rf .git
 
@@ -49,11 +49,19 @@ files=$(echo $tarfile.*)
 
 [ "$files" != "" ]
 
+for file in $files; do
+    gpg -b -a $file
+done
+
+sigs=$(echo $tarfile.*asc)
+
+[ "$sigs" != "" ]
+
 ssh $server \
     "mkdir -p $ftpdir"
 
 scp \
-    $files \
+    $files $sigs \
     "$server:$ftpdir"
 
 ssh $server \

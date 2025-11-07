@@ -1,6 +1,7 @@
 /* Copyright (C) 2001-2021 Red Hat, Inc.
    Copyright (C) 2003 Free Software Foundation, Inc.
    Copyright (C) 2019-2021 SUSE LLC.
+   Copyright (C) 2025 Mark J. Wielaard <mark@klomp.org>
    Written by Jakub Jelinek <jakub@redhat.com>, 2012.
 
    This program is free software; you can redistribute it and/or modify
@@ -466,6 +467,7 @@ version (void)
 	  "Copyright (C) " RH_YEARS " Red Hat, Inc.\n"
 	  "Copyright (C) " FSF_YEARS " Free Software Foundation, Inc.\n"
 	  "Copyright (C) " SUSE_YEARS " SUSE LLC.\n"
+	  "Copyright (C) " MJW_YEARS " Mark J. Wielaard <mark@klomp.org>\n"
 	  "This program is free software; you may redistribute it under the terms of\n"
 	  "the GNU General Public License version 3 or (at your option) any later version.\n"
 	  "This program has absolutely no warranty.\n");
