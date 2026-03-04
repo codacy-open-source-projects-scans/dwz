@@ -6450,8 +6450,9 @@ try_debug_info (DSO *dso)
 	    continue;
 	  if (ndies == max_die_limit)
 	    {
-	      error (0, 0, "%s: Too many DIEs, not optimizing",
-		     dso->filename);
+	      error (0, 0, "%s: Too many DIEs (--max-die-limit=%u),"
+			   " not optimizing",
+		     dso->filename, max_die_limit);
 	      goto fail;
 	    }
 	  /* If we reach the DIE limit, signal the dwz caller that it
@@ -6860,8 +6861,9 @@ read_debug_info (DSO *dso, int kind, unsigned int *die_count)
 	    {
 	      if (ndies == max_die_limit)
 		{
-		  error (0, 0, "%s: Too many DIEs, not optimizing",
-			 dso->filename);
+		  error (0, 0, "%s: Too many DIEs (--max-die-limit=%u),",
+			       " not optimizing",
+			 dso->filename, max_die_limit);
 		  goto fail;
 		}
 	      /* If we reach the DIE limit, silently signal the dwz
