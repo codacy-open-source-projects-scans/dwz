@@ -6861,7 +6861,7 @@ read_debug_info (DSO *dso, int kind, unsigned int *die_count)
 	    {
 	      if (ndies == max_die_limit)
 		{
-		  error (0, 0, "%s: Too many DIEs (--max-die-limit=%u),",
+		  error (0, 0, "%s: Too many DIEs (--max-die-limit=%u),"
 			       " not optimizing",
 			 dso->filename, max_die_limit);
 		  goto fail;
