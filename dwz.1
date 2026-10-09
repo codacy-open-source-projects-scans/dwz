@@ -1,4 +1,4 @@
-.TH dwz 1 "15 Feb 2021"
+.TH dwz 1 "20 May 2026"
 .SH NAME
 dwz \- DWARF optimization and duplicate removal tool
 .SH SYNOPSIS
@@ -36,6 +36,13 @@ emitted by GCC when generating Split DWARF, \fIDW_FORM_strx\fR and
 \fI.debug_str_offsets\fR, \fIDW_FORM_addrx\fR and \fI.debug_addr\fR,
 \fIDW_FORM_rnglistx\fR and \fIDW_FORM_loclistsx\fR, are not supported
 yet.
+
+Compressed debug sections are supported on input: both the gABI
+\fISHF_COMPRESSED\fR scheme (with \fIELFCOMPRESS_ZLIB\fR or
+\fIELFCOMPRESS_ZSTD\fR) and the legacy GNU \fI.zdebug_*\fR scheme.
+Each section is re-emitted in the same scheme it was read in;
+uncompressed inputs stay uncompressed.  In multifile mode the shared
+object created by \fI-m\fR is always written uncompressed.
 
 The tool has two main modes of operation, without the
 \fI-m\fR option it attempts to optimize DWARF debugging information in each

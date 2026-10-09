@@ -55,6 +55,20 @@
 # define SHF_COMPRESSED (1 << 11)  /* Section with compressed data.  */
 #endif
 
+#ifndef ELFCOMPRESS_ZSTD
+ /* So ZSTD compression can be used even with an old system elf.h.  */
+ #define ELFCOMPRESS_ZSTD       2          /* Zstandard algorithm.  */
+#endif
+
+/* Per-section compression scheme to preserve across read/write.  */
+enum debug_section_comp
+{
+  COMP_NONE,
+  COMP_GABI_ZLIB,
+  COMP_GABI_ZSTD,
+  COMP_GNU_ZLIB,
+};
+
 /* Theory of operation:
    The DWZ tool can either optimize debug sections of a single
    executable or shared library at a time, or, when -m option
@@ -770,31 +784,32 @@ static struct
   size_t size;
   size_t new_size;
   int sec;
+  enum debug_section_comp comp;
 } debug_sections[] =
   {
-    { ".debug_info", NULL, NULL, 0, 0, 0 },
-    { ".debug_abbrev", NULL, NULL, 0, 0, 0 },
-    { ".debug_line", NULL, NULL, 0, 0, 0 },
-    { ".debug_str", NULL, NULL, 0, 0, 0 },
-    { ".debug_macro", NULL, NULL, 0, 0, 0 },
-    { ".debug_types", NULL, NULL, 0, 0, 0 },
-    { ".debug_aranges", NULL, NULL, 0, 0, 0 },
-    { ".debug_pubnames", NULL, NULL, 0, 0, 0 },
-    { ".debug_pubtypes", NULL, NULL, 0, 0, 0 },
-    { ".debug_gnu_pubnames", NULL, NULL, 0, 0, 0 },
-    { ".debug_gnu_pubtypes", NULL, NULL, 0, 0, 0 },
-    { ".debug_macinfo", NULL, NULL, 0, 0, 0 },
-    { ".debug_loc", NULL, NULL, 0, 0, 0 },
-    { ".debug_loclists", NULL, NULL, 0, 0, 0 },
-    { ".debug_frame", NULL, NULL, 0, 0, 0 },
-    { ".debug_ranges", NULL, NULL, 0, 0, 0 },
-    { ".debug_rnglists", NULL, NULL, 0, 0, 0 },
-    { ".debug_line_str", NULL, NULL, 0, 0, 0 },
-    { ".debug_sup", NULL, NULL, 0, 0, 0 },
-    { ".debug_gdb_scripts", NULL, NULL, 0, 0, 0 },
-    { ".gdb_index", NULL, NULL, 0, 0, 0 },
-    { ".gnu_debugaltlink", NULL, NULL, 0, 0, 0 },
-    { NULL, NULL, NULL, 0, 0, 0 }
+    { ".debug_info", NULL, NULL, 0, 0, 0, COMP_NONE },
+    { ".debug_abbrev", NULL, NULL, 0, 0, 0, COMP_NONE },
+    { ".debug_line", NULL, NULL, 0, 0, 0, COMP_NONE },
+    { ".debug_str", NULL, NULL, 0, 0, 0, COMP_NONE },
+    { ".debug_macro", NULL, NULL, 0, 0, 0, COMP_NONE },
+    { ".debug_types", NULL, NULL, 0, 0, 0, COMP_NONE },
+    { ".debug_aranges", NULL, NULL, 0, 0, 0, COMP_NONE },
+    { ".debug_pubnames", NULL, NULL, 0, 0, 0, COMP_NONE },
+    { ".debug_pubtypes", NULL, NULL, 0, 0, 0, COMP_NONE },
+    { ".debug_gnu_pubnames", NULL, NULL, 0, 0, 0, COMP_NONE },
+    { ".debug_gnu_pubtypes", NULL, NULL, 0, 0, 0, COMP_NONE },
+    { ".debug_macinfo", NULL, NULL, 0, 0, 0, COMP_NONE },
+    { ".debug_loc", NULL, NULL, 0, 0, 0, COMP_NONE },
+    { ".debug_loclists", NULL, NULL, 0, 0, 0, COMP_NONE },
+    { ".debug_frame", NULL, NULL, 0, 0, 0, COMP_NONE },
+    { ".debug_ranges", NULL, NULL, 0, 0, 0, COMP_NONE },
+    { ".debug_rnglists", NULL, NULL, 0, 0, 0, COMP_NONE },
+    { ".debug_line_str", NULL, NULL, 0, 0, 0, COMP_NONE },
+    { ".debug_sup", NULL, NULL, 0, 0, 0, COMP_NONE },
+    { ".debug_gdb_scripts", NULL, NULL, 0, 0, 0, COMP_NONE },
+    { ".gdb_index", NULL, NULL, 0, 0, 0, COMP_NONE },
+    { ".gnu_debugaltlink", NULL, NULL, 0, 0, 0, COMP_NONE },
+    { NULL, NULL, NULL, 0, 0, 0, COMP_NONE }
   };
 
 /* Copies of .new_data fields during write_multifile.  */
@@ -13680,21 +13695,70 @@ read_dwarf (DSO *dso, bool quieter, unsigned int *die_count)
       {
 	const char *name = strptr (dso, dso->ehdr.e_shstrndx,
 				   dso->shdr[i].sh_name);
+	bool is_zdebug
+	  = strncmp (name, ".zdebug_", sizeof (".zdebug_") - 1) == 0;
+	/* For .zdebug_foo, match against .debug_foo in debug_sections[] by
+	   skipping ".z" instead of ".".  */
+	size_t skip = is_zdebug ? 2 : 1;
+	enum debug_section_comp comp = COMP_NONE;
 
-	if (strncmp (name, ".debug_", sizeof (".debug_") - 1) == 0
-	    || strcmp (name, ".gdb_index") == 0
-	    || strcmp (name, ".gnu_debugaltlink") == 0)
+	if (strncmp (name + skip, "debug_", sizeof ("debug_") - 1) == 0
+	    || strcmp (name + skip, "gdb_index") == 0
+	    || strcmp (name + skip, "gnu_debugaltlink") == 0)
 	  {
 	    if (dso->shdr[i].sh_flags & SHF_COMPRESSED)
 	      {
-		error (0, 0,
-		       "%s: Found compressed %s section, not attempting dwz"
-		       " compression",
-		       dso->filename, name);
-		return 1;
+		GElf_Chdr chdr;
+		if (gelf_getchdr (dso->scn[i], &chdr) == NULL)
+		  {
+		    error (0, 0, "%s: Could not read compression header for %s",
+			   dso->filename, name);
+		    return 1;
+		  }
+		if (chdr.ch_type == ELFCOMPRESS_ZLIB)
+		  comp = COMP_GABI_ZLIB;
+		else if (chdr.ch_type == ELFCOMPRESS_ZSTD)
+		  comp = COMP_GABI_ZSTD;
+		else
+		  {
+		    error (0, 0,
+			   "%s: %s uses unsupported compression type %u",
+			   dso->filename, name,
+			   (unsigned int) chdr.ch_type);
+		    return 1;
+		  }
 	      }
+	    else if (is_zdebug)
+	      comp = COMP_GNU_ZLIB;
+
+	    if (comp != COMP_NONE)
+	      {
+		/* The layout pass in write_dso uses dso->shdr[i].sh_size as
+		   the original on-disk size to compute offset shifts.  We
+		   refresh sh_addralign (now = ch_addralign, the true
+		   uncompressed alignment) but restore the on-disk size.  */
+		GElf_Xword on_disk_size = dso->shdr[i].sh_size;
+		int rc = (comp == COMP_GNU_ZLIB
+			  ? elf_compress_gnu (dso->scn[i], 0, 0)
+			  : elf_compress (dso->scn[i], 0, 0));
+		if (rc < 0)
+		  {
+		    error (0, 0, "%s: Failed to decompress %s: %s",
+			   dso->filename, name, elf_errmsg (-1));
+		    return 1;
+		  }
+		if (gelf_getshdr (dso->scn[i], &dso->shdr[i]) == NULL)
+		  {
+		    error (0, 0,
+			   "%s: Could not re-read section header after"
+			   " decompressing %s", dso->filename, name);
+		    return 1;
+		  }
+		dso->shdr[i].sh_size = on_disk_size;
+	      }
+
 	    for (j = 0; debug_sections[j].name; ++j)
-	      if (strcmp (name, debug_sections[j].name) == 0)
+	      if (strcmp (name + skip, debug_sections[j].name + 1) == 0)
 		{
 		  if (debug_sections[j].data)
 		    {
@@ -13714,11 +13778,16 @@ read_dwarf (DSO *dso, bool quieter, unsigned int *die_count)
 		    }
 		  assert (elf_rawdata (scn, data) == NULL);
 		  assert (data->d_off == 0);
-		  assert (data->d_size == dso->shdr[i].sh_size);
+		  /* For compressed sections dso->shdr[i].sh_size still holds
+		     the on-disk (compressed) size while data->d_size is the
+		     decompressed size, so we cannot assert they match.  */
+		  assert (comp != COMP_NONE
+			  || data->d_size == dso->shdr[i].sh_size);
 		  debug_sections[j].data = data->d_buf;
 		  debug_sections[j].size = data->d_size;
 		  debug_sections[j].new_size = data->d_size;
 		  debug_sections[j].sec = i;
+		  debug_sections[j].comp = comp;
 		  break;
 		}
 
@@ -14029,6 +14098,37 @@ calculate_section_distance (DSO *dso, unsigned int *sorted_section_numbers,
   return 0;
 }
 
+/* Derive from debug_sections[] which input sections will be dropped from
+   the output (REMOVE_SECTIONS, indexed by debug_sections[] index) and the
+   output-section-table position right before where any newly added
+   sections will land (*ADDSEC, or -1 if no sections are being added).
+   write_dso needs both before it can lay out the output ELF.  */
+static void
+compute_section_changes (int *addsec, bool remove_sections[SECTION_COUNT])
+{
+  int j;
+
+  for (j = 0; debug_sections[j].name; j++)
+    {
+      if (debug_sections[j].sec != 0
+	  && debug_sections[j].size != 0
+	  && debug_sections[j].new_size == 0)
+	remove_sections[j] = true;
+      if (debug_sections[j].new_size != 0
+	  && debug_sections[j].size == 0
+	  && debug_sections[j].sec == 0
+	  && *addsec == -1)
+	{
+	  int k;
+	  for (k = 0; debug_sections[k].name; k++)
+	    if (debug_sections[k].new_size
+		&& debug_sections[k].sec
+		&& debug_sections[k].sec > *addsec)
+	      *addsec = debug_sections[k].sec;
+	}
+    }
+}
+
 /* Store new ELF into FILE.  debug_sections array contains
    new_data/new_size pairs where needed.  */
 static int
@@ -14048,6 +14148,13 @@ write_dso (DSO *dso, const char *file, struct stat *st, bool save_to_temp)
   /* Array of sections and section header table sorted by file offset.  */
   unsigned int sorted_section_numbers[dso->ehdr.e_shnum + 1];
   GElf_Off old_sh_offset[dso->ehdr.e_shnum];
+  /* Output section pointers indexed by input section number; NULL for
+     sections that get dropped from the output.  */
+  Elf_Scn *out_scns[dso->ehdr.e_shnum];
+  /* Output section pointers for sections being added (e.g.
+     .gnu_debugaltlink), indexed by debug_sections[] index.  NULL for
+     entries that are not being added.  */
+  Elf_Scn *added_scns[SECTION_COUNT];
 
   if (unlikely (progress_p))
     {
@@ -14059,11 +14166,211 @@ write_dso (DSO *dso, const char *file, struct stat *st, bool save_to_temp)
     old_sh_offset[i] = dso->shdr[i].sh_offset;
 
   memset (remove_sections, '\0', sizeof (remove_sections));
+  memset (added_scns, '\0', sizeof (added_scns));
   ehdr = dso->ehdr;
 
   sort_section_numbers (dso, sorted_section_numbers);
   if (calculate_section_distance (dso, sorted_section_numbers, distance))
     return 1;
+
+  /* Open the output ELF early.  For sections whose input was compressed
+     we need to call elf_compress on the output scn (which requires the
+     scn to live in an Elf) to learn the post-compress sh_size before
+     running the layout pass below.  */
+  if (file == NULL)
+    {
+      size_t len = strlen (dso->filename);
+      filename = alloca (len + sizeof (".#dwz#.XXXXXX"));
+      memcpy (filename, dso->filename, len);
+      memcpy (filename + len, ".#dwz#.XXXXXX", sizeof (".#dwz#.XXXXXX"));
+      fd = mkstemp (filename);
+      file = (const char *) filename;
+      if (fd == -1)
+	{
+	  error (0, errno, "Failed to create temporary file for %s",
+		 dso->filename);
+	  return 1;
+	}
+    }
+  else
+    {
+      fd = open (file, O_RDWR | O_CREAT, 0600);
+      if (fd == -1)
+	{
+	  error (0, errno, "Failed to open %s for writing", file);
+	  return 1;
+	}
+    }
+
+  elf = elf_begin (fd, ELF_C_WRITE, NULL);
+  if (elf == NULL)
+    {
+      error (0, 0, "cannot open ELF file: %s", elf_errmsg (-1));
+      unlink (file);
+      close (fd);
+      return 1;
+    }
+
+  /* Some gelf_newehdr implementations don't return the resulting
+     ElfNN_Ehdr, so we have to do it the hard way instead of:
+     e_ident = (char *) gelf_newehdr (elf, gelf_getclass (dso->elf));  */
+  switch (gelf_getclass (dso->elf))
+    {
+    case ELFCLASS32:
+      e_ident = (char *) elf32_newehdr (elf);
+      break;
+    case ELFCLASS64:
+      e_ident = (char *) elf64_newehdr (elf);
+      break;
+    default:
+      e_ident = NULL;
+      break;
+    }
+  if (e_ident == NULL
+      /* For the gelfx wrapper, so gelf_update_ehdr already has the
+	 correct ELF class.  */
+      || memcpy (e_ident, dso->ehdr.e_ident, EI_NIDENT) == NULL)
+    {
+      error (0, 0, "Could not create new ELF headers");
+      unlink (file);
+      elf_end (elf);
+      close (fd);
+      return 1;
+    }
+  elf_flagelf (elf, ELF_C_SET, ELF_F_LAYOUT | ELF_F_PERMISSIVE);
+
+  /* Compute remove_sections and addsec early so phase 1 can match the
+     output-section ordering that the layout pass below assumes.  The
+     layout pass also derives these values but uses them in place; we
+     need them sooner so we can skip elf_newscn for removed input
+     sections and slot any added sections (e.g. .gnu_debugaltlink in
+     multifile mode) directly after the highest existing debug section
+     index.  */
+  compute_section_changes (&addsec, remove_sections);
+
+  /* Create output scns for all non-removed input sections and attach data.
+     For sections whose input was compressed, recompress with libelf and
+     fold the resulting sh_size back into new_size so the layout pass uses
+     the actual on-disk size.  When we hit the addsec slot, also create
+     the scns for any sections being added so they land at addsec+1 in
+     the output (matching what the layout pass assumes for sh_link).  */
+  out_scns[0] = NULL;
+  for (i = 1; i < dso->ehdr.e_shnum; ++i)
+    {
+      Elf_Scn *scn;
+      Elf_Data *data1, *data2;
+
+      for (j = 0; debug_sections[j].name; j++)
+	if (i == debug_sections[j].sec)
+	  break;
+      if (debug_sections[j].name && remove_sections[j])
+	{
+	  out_scns[i] = NULL;
+	  continue;
+	}
+
+      scn = elf_newscn (elf);
+      if (scn == NULL)
+	{
+	  error (0, 0, "%s: elf_newscn failed: %s",
+		 dso->filename, elf_errmsg (-1));
+	  unlink (file);
+	  elf_end (elf);
+	  close (fd);
+	  return 1;
+	}
+      out_scns[i] = scn;
+      gelf_update_shdr (scn, &dso->shdr[i]);
+
+      data1 = elf_getdata (dso->scn[i], NULL);
+      data2 = elf_newdata (scn);
+      if (data1 == NULL || data2 == NULL)
+	{
+	  error (0, 0, "%s: %s failed: %s", dso->filename,
+		 data1 == NULL ? "elf_getdata" : "elf_newdata",
+		 elf_errmsg (-1));
+	  unlink (file);
+	  elf_end (elf);
+	  close (fd);
+	  return 1;
+	}
+      memcpy (data2, data1, sizeof (*data1));
+      if (debug_sections[j].name && debug_sections[j].new_data != NULL)
+	{
+	  data2->d_buf = debug_sections[j].new_data;
+	  data2->d_size = debug_sections[j].new_size;
+	}
+
+      if (debug_sections[j].name && debug_sections[j].comp != COMP_NONE)
+	{
+	  GElf_Shdr post_shdr;
+	  int rc;
+	  if (debug_sections[j].comp == COMP_GNU_ZLIB)
+	    rc = elf_compress_gnu (scn, 1, ELF_CHF_FORCE);
+	  else
+	    {
+	      int ch_type = (debug_sections[j].comp == COMP_GABI_ZLIB
+			     ? ELFCOMPRESS_ZLIB : ELFCOMPRESS_ZSTD);
+	      rc = elf_compress (scn, ch_type, ELF_CHF_FORCE);
+	    }
+	  if (rc < 0)
+	    {
+	      error (0, 0, "%s: Failed to recompress %s: %s",
+		     dso->filename, debug_sections[j].name, elf_errmsg (-1));
+	      unlink (file);
+	      elf_end (elf);
+	      close (fd);
+	      return 1;
+	    }
+	  if (gelf_getshdr (scn, &post_shdr) == NULL)
+	    {
+	      error (0, 0,
+		     "%s: Could not read section header after recompressing %s",
+		     dso->filename, debug_sections[j].name);
+	      unlink (file);
+	      elf_end (elf);
+	      close (fd);
+	      return 1;
+	    }
+	  /* Mirror what elf_compress changed into dso->shdr so the layout
+	     pass and the final gelf_update_shdr both see the post-compress
+	     SHF_COMPRESSED, sh_addralign and (via new_size) sh_size.  */
+	  debug_sections[j].new_size = post_shdr.sh_size;
+	  dso->shdr[i].sh_flags = post_shdr.sh_flags;
+	  dso->shdr[i].sh_addralign = post_shdr.sh_addralign;
+	}
+
+      /* If this is the last existing debug section, the layout pass
+	 inserts any to-be-added sections directly after it; create those
+	 scns here too so they end up at output index addsec+1.  Their
+	 shdr is finalised in phase 3 once we know shstrtab offsets.  */
+      if (i == addsec)
+	for (j = 0; debug_sections[j].name; j++)
+	  if (debug_sections[j].new_size
+	      && debug_sections[j].size == 0
+	      && debug_sections[j].sec == 0)
+	    {
+	      Elf_Scn *new_scn = elf_newscn (elf);
+	      Elf_Data *new_data = new_scn ? elf_newdata (new_scn) : NULL;
+	      if (new_scn == NULL || new_data == NULL)
+		{
+		  error (0, 0, "%s: %s failed: %s", dso->filename,
+			 new_scn == NULL ? "elf_newscn" : "elf_newdata",
+			 elf_errmsg (-1));
+		  unlink (file);
+		  elf_end (elf);
+		  close (fd);
+		  return 1;
+		}
+	      added_scns[j] = new_scn;
+	      new_data->d_buf = debug_sections[j].new_data;
+	      new_data->d_size = debug_sections[j].new_size;
+	      new_data->d_type = ELF_T_BYTE;
+	      new_data->d_version = EV_CURRENT;
+	      new_data->d_off = 0;
+	      new_data->d_align = 1;
+	    }
+    }
 
   for (i = 0; debug_sections[i].name; i++)
     if (debug_sections[i].new_size != debug_sections[i].size)
@@ -14072,12 +14379,7 @@ write_dso (DSO *dso, const char *file, struct stat *st, bool save_to_temp)
 	    && debug_sections[i].sec == 0)
 	  {
 	    unsigned int len;
-	    if (addsec == -1)
-	      for (j = 0; debug_sections[j].name; j++)
-		if (debug_sections[j].new_size
-		    && debug_sections[j].sec
-		    && debug_sections[j].sec > addsec)
-		  addsec = debug_sections[j].sec;
+	    /* addsec was pre-computed by compute_section_changes.  */
 	    ehdr.e_shnum++;
 	    if (ehdr.e_shoff < min_shoff)
 	      min_shoff = ehdr.e_shoff;
@@ -14128,7 +14430,7 @@ write_dso (DSO *dso, const char *file, struct stat *st, bool save_to_temp)
 	  = debug_sections[i].new_size;
 	if (debug_sections[i].new_size == 0)
 	  {
-	    remove_sections[i] = true;
+	    /* remove_sections was pre-computed by compute_section_changes.  */
 	    ehdr.e_shnum--;
 	    if (ehdr.e_shoff < min_shoff)
 	      min_shoff = ehdr.e_shoff;
@@ -14190,6 +14492,9 @@ write_dso (DSO *dso, const char *file, struct stat *st, bool save_to_temp)
 		{
 		  error (0, 0, "Allocatable section in %s after "
 			 "non-allocatable ones", dso->filename);
+		  unlink (file);
+		  elf_end (elf);
+		  close (fd);
 		  return 1;
 		}
 	      else
@@ -14243,68 +14548,16 @@ write_dso (DSO *dso, const char *file, struct stat *st, bool save_to_temp)
 	{
 	  error (0, ENOMEM, "Failed to adjust .shstrtab for %s",
 		 dso->filename);
+	  unlink (file);
+	  elf_end (elf);
+	  close (fd);
 	  return 1;
 	}
     }
 
-  if (file == NULL)
-    {
-      size_t len = strlen (dso->filename);
-      filename = alloca (len + sizeof (".#dwz#.XXXXXX"));
-      memcpy (filename, dso->filename, len);
-      memcpy (filename + len, ".#dwz#.XXXXXX", sizeof (".#dwz#.XXXXXX"));
-      fd = mkstemp (filename);
-      file = (const char *) filename;
-      if (fd == -1)
-	{
-	  error (0, errno, "Failed to create temporary file for %s",
-		 dso->filename);
-	  free (shstrtab);
-	  return 1;
-	}
-    }
-  else
-    {
-      fd = open (file, O_RDWR | O_CREAT, 0600);
-      if (fd == -1)
-	{
-	  error (0, errno, "Failed to open %s for writing", file);
-	  free (shstrtab);
-	  return 1;
-	}
-    }
-
-  elf = elf_begin (fd, ELF_C_WRITE, NULL);
-  if (elf == NULL)
-    {
-      error (0, 0, "cannot open ELF file: %s", elf_errmsg (-1));
-      unlink (file);
-      close (fd);
-      free (shstrtab);
-      return 1;
-    }
-
-  /* Some gelf_newehdr implementations don't return the resulting
-     ElfNN_Ehdr, so we have to do it the hard way instead of:
-     e_ident = (char *) gelf_newehdr (elf, gelf_getclass (dso->elf));  */
-  switch (gelf_getclass (dso->elf))
-    {
-    case ELFCLASS32:
-      e_ident = (char *) elf32_newehdr (elf);
-      break;
-    case ELFCLASS64:
-      e_ident = (char *) elf64_newehdr (elf);
-      break;
-    default:
-      e_ident = NULL;
-      break;
-    }
-
-  if (e_ident == NULL
-      /* This is here just for the gelfx wrapper, so that gelf_update_ehdr
-	 already has the correct ELF class.  */
-      || memcpy (e_ident, dso->ehdr.e_ident, EI_NIDENT) == NULL
-      || gelf_update_ehdr (elf, &ehdr) == 0
+  /* Finalize ehdr and phdrs now that the layout pass has settled
+     e_shnum / e_shoff / e_shstrndx.  */
+  if (gelf_update_ehdr (elf, &ehdr) == 0
       || gelf_newphdr (elf, ehdr.e_phnum) == 0)
     {
       error (0, 0, "Could not create new ELF headers");
@@ -14314,7 +14567,6 @@ write_dso (DSO *dso, const char *file, struct stat *st, bool save_to_temp)
       free (shstrtab);
       return 1;
     }
-  elf_flagelf (elf, ELF_C_SET, ELF_F_LAYOUT | ELF_F_PERMISSIVE);
   for (i = 0; i < ehdr.e_phnum; ++i)
     {
       GElf_Phdr *phdr, phdr_mem;
@@ -14322,69 +14574,62 @@ write_dso (DSO *dso, const char *file, struct stat *st, bool save_to_temp)
       gelf_update_phdr (elf, i, phdr);
     }
 
+  /* Re-emit each output scn's shdr with the final layout values, swap in
+     the rebuilt .shstrtab if any.  */
   for (i = 1; i < dso->ehdr.e_shnum; ++i)
     {
-      Elf_Scn *scn;
-      Elf_Data *data1, *data2;
+      Elf_Scn *scn = out_scns[i];
 
-      for (j = 0; debug_sections[j].name; j++)
-	if (i == debug_sections[j].sec)
-	  break;
-      if (debug_sections[j].name && remove_sections[j])
+      if (scn == NULL)
 	continue;
-      scn = elf_newscn (elf);
-      elf_flagscn (scn, ELF_C_SET, ELF_F_DIRTY);
+
       gelf_update_shdr (scn, &dso->shdr[i]);
-      data1 = elf_getdata (dso->scn[i], NULL);
-      data2 = elf_newdata (scn);
-      memcpy (data2, data1, sizeof (*data1));
-      if (debug_sections[j].name
-	  && debug_sections[j].new_data != NULL)
-	{
-	  data2->d_buf = debug_sections[j].new_data;
-	  data2->d_size = dso->shdr[i].sh_size;
-	}
+
       if (i == dso->ehdr.e_shstrndx && shstrtabadd)
 	{
-	  memcpy (shstrtab, data1->d_buf,
-		  dso->shdr[dso->ehdr.e_shstrndx].sh_size
-		  - shstrtabadd);
+	  Elf_Data *data2 = elf_getdata (scn, NULL);
+	  if (data2 == NULL)
+	    {
+	      error (0, 0, "%s: elf_getdata on shstrtab failed: %s",
+		     dso->filename, elf_errmsg (-1));
+	      unlink (file);
+	      elf_end (elf);
+	      close (fd);
+	      free (shstrtab);
+	      return 1;
+	    }
+	  memcpy (shstrtab, data2->d_buf,
+		  dso->shdr[dso->ehdr.e_shstrndx].sh_size - shstrtabadd);
 	  data2->d_buf = shstrtab;
 	  data2->d_size = dso->shdr[i].sh_size;
 	}
-      if (i == addsec)
-	{
-	  GElf_Word sh_name = dso->shdr[dso->ehdr.e_shstrndx].sh_size
-			      - shstrtabadd;
-	  GElf_Shdr shdr;
+    }
 
-	  off = dso->shdr[i].sh_offset + dso->shdr[i].sh_size;
-	  for (j = 0; debug_sections[j].name; j++)
-	    if (debug_sections[j].new_size
-		&& debug_sections[j].size == 0
-		&& debug_sections[j].sec == 0)
-	      {
-		scn = elf_newscn (elf);
-		elf_flagscn (scn, ELF_C_SET, ELF_F_DIRTY);
-		memset (&shdr, '\0', sizeof (shdr));
-		shdr.sh_name = sh_name;
-		sh_name += strlen (debug_sections[j].name) + 1;
-		strcpy (shstrtab + shdr.sh_name, debug_sections[j].name);
-		shdr.sh_type = SHT_PROGBITS;
-		shdr.sh_offset = off;
-		shdr.sh_size = debug_sections[j].new_size;
-		shdr.sh_addralign = 1;
-		off += shdr.sh_size;
-		gelf_update_shdr (scn, &shdr);
-		data2 = elf_newdata (scn);
-		data2->d_buf = debug_sections[j].new_data;
-		data2->d_type = ELF_T_BYTE;
-		data2->d_version = EV_CURRENT;
-		data2->d_size = shdr.sh_size;
-		data2->d_off = 0;
-		data2->d_align = 1;
-	      }
-	}
+  /* Finalise the shdrs for any sections we added in phase 1.  Their scns
+     were created with placeholder shdrs; now that shstrtab is populated
+     we can write proper sh_name / sh_offset / sh_size values.  */
+  if (addsec != -1)
+    {
+      GElf_Word sh_name = dso->shdr[dso->ehdr.e_shstrndx].sh_size
+			  - shstrtabadd;
+
+      off = dso->shdr[addsec].sh_offset + dso->shdr[addsec].sh_size;
+      for (j = 0; debug_sections[j].name; j++)
+	if (added_scns[j] != NULL)
+	  {
+	    GElf_Shdr shdr;
+
+	    memset (&shdr, '\0', sizeof (shdr));
+	    shdr.sh_name = sh_name;
+	    sh_name += strlen (debug_sections[j].name) + 1;
+	    strcpy (shstrtab + shdr.sh_name, debug_sections[j].name);
+	    shdr.sh_type = SHT_PROGBITS;
+	    shdr.sh_offset = off;
+	    shdr.sh_size = debug_sections[j].new_size;
+	    shdr.sh_addralign = 1;
+	    off += shdr.sh_size;
+	    gelf_update_shdr (added_scns[j], &shdr);
+	  }
     }
 
   if (elf_update (elf, ELF_C_WRITE_MMAP) == -1)
@@ -15689,6 +15934,7 @@ dwz (const char *file, const char *outfile, struct file_result *res)
       debug_sections[i].new_data = NULL;
       debug_sections[i].new_size = 0;
       debug_sections[i].sec = 0;
+      debug_sections[i].comp = COMP_NONE;
     }
 
   if (elf_end (dso->elf) < 0)
@@ -16138,6 +16384,7 @@ optimize_multifile (unsigned int *die_count)
       debug_sections[i].new_data = NULL;
       debug_sections[i].new_size = 0;
       debug_sections[i].sec = 0;
+      debug_sections[i].comp = COMP_NONE;
     }
 
   return fd;
@@ -16266,6 +16513,7 @@ read_multifile (int fd, unsigned int die_count)
       debug_sections[i].new_data = NULL;
       debug_sections[i].new_size = 0;
       debug_sections[i].sec = 0;
+      debug_sections[i].comp = COMP_NONE;
     }
 
   return ret;
